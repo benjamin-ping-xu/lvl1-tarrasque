@@ -55,8 +55,8 @@ def simulate_battle(num_clerics, initial_tarrasque_hp):
     """
     Runs a single simulation of the battle.
     Returns a tuple:
-      (win: bool, rounds: int)
-    A win means the Tarrasque's HP dropped to 0 or below.
+      (win: bool, rounds: int, body_count: int)
+    where body_count is the number of clerics that died.
     """
     # (Optional) Set seed for reproducibility if desired
     #random.seed(42)
@@ -97,7 +97,9 @@ def simulate_battle(num_clerics, initial_tarrasque_hp):
         if tarrasque_hp <= 0:
             if VERBOSE:
                 logging.info("The Tarrasque has been defeated by the clerics!")
-            return (True, rounds)
+            # Calculate body count at end of battle
+            body_count = len([cleric for cleric in clerics if not cleric.is_alive()])
+            return (True, rounds, body_count)
         
         # Tarrasque's turn: it makes 8 attacks
         for attack in range(8):
@@ -131,17 +133,20 @@ def simulate_battle(num_clerics, initial_tarrasque_hp):
             if tarrasque_hp <= 0:
                 if VERBOSE:
                     logging.info("The Tarrasque has been defeated mid-round by reactive damage!")
-                return (True, rounds)
+                body_count = len([cleric for cleric in clerics if not cleric.is_alive()])
+                return (True, rounds, body_count)
     
     # If the loop ends and the Tarrasque is still alive, the clerics have failed.
+    # End of battle: if tarrasque survived, body count is all clerics that died.
+    body_count = len([cleric for cleric in clerics if not cleric.is_alive()])
     if tarrasque_hp <= 0:
         if VERBOSE:
             logging.info("The Tarrasque has been defeated by the clerics!")
-        return (True, rounds)
+        return (True, rounds, body_count)
     else:
         if VERBOSE:
             logging.info("All clerics have fallen. The Tarrasque prevails.")
-        return (False, rounds)
+        return (False, rounds, body_count)
 
 def run_batch_simulations(min_clerics, max_clerics, num_simulations, output_csv='simulation_summary.csv'):
     """
@@ -156,12 +161,15 @@ def run_batch_simulations(min_clerics, max_clerics, num_simulations, output_csv=
     for num_clerics in range(min_clerics, max_clerics + 1):
         wins = 0
         rounds_list = []
+        body_counts = []
+
         for sim in range(num_simulations):
             tarrasque_hp = sum(random.randint(1, 20) for _ in range(33)) + 330
-            win, rounds = simulate_battle(num_clerics, tarrasque_hp)
+            win, rounds, body_count = simulate_battle(num_clerics, tarrasque_hp)
             if win:
                 wins += 1
             rounds_list.append(rounds)
+            body_counts.append(body_count)
         
         win_rate = wins / num_simulations
         
@@ -180,6 +188,13 @@ def run_batch_simulations(min_clerics, max_clerics, num_simulations, output_csv=
         ci_rounds_lower = avg_rounds - 1.96 * se_rounds
         ci_rounds_upper = avg_rounds + 1.96 * se_rounds
 
+        # Average body count and confidence intervals
+        avg_body_count = sum(body_counts) / num_simulations
+        stdev_body = statistics.stdev(body_counts) if num_simulations > 1 else 0
+        se_body = stdev_body / math.sqrt(num_simulations)
+        ci_body_lower = avg_body_count - 1.96 * se_body
+        ci_body_upper = avg_body_count + 1.96 * se_body
+
         summary_results.append({
             'num_clerics': num_clerics,
             'simulations': num_simulations,
@@ -190,15 +205,18 @@ def run_batch_simulations(min_clerics, max_clerics, num_simulations, output_csv=
             'ci_win_upper': ci_win_upper,
             'avg_rounds': avg_rounds,
             'ci_rounds_lower': ci_rounds_lower,
-            'ci_rounds_upper': ci_rounds_upper
+            'ci_rounds_upper': ci_rounds_upper,
+            'avg_body_count': avg_body_count,
+            'ci_body_lower': ci_body_lower,
+            'ci_body_upper': ci_body_upper
         })
 
-        print(f"Clerics: {num_clerics}, Win Rate: {win_rate:.3f} (W: {wins} L: {num_simulations - wins}), " +
-              f"Avg Rounds: {avg_rounds:.2f} (CI: {ci_rounds_lower:.2f}-{ci_rounds_upper:.2f})")
+        print(f"Clerics: {num_clerics}, Win Rate: {win_rate:.3f}, Avg Rounds: {avg_rounds:.2f}, Avg Body Count: {avg_body_count:.2f}")
+
 
     with open(output_csv, 'w', newline='') as csvfile:
         fieldnames = ['num_clerics', 'simulations', 'win_rate', 'wins', 'losses', 'ci_win_lower', 'ci_win_upper',
-                      'avg_rounds', 'ci_rounds_lower', 'ci_rounds_upper']
+                      'avg_rounds', 'ci_rounds_lower', 'ci_rounds_upper', 'avg_body_count', 'ci_body_lower', 'ci_body_upper']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for row in summary_results:
